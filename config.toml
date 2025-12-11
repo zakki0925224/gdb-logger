@@ -4,4 +4,4 @@ gdb_timeout_wait_booting = 6
 gdb_timeout_wait_next = 0.05
 gdb_symbol_file = "../myos-x86_64/build/kernel.elf"
 
-udp_port = 6666
+api_endpoint = "http://localhost:8203/log/"

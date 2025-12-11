@@ -4,7 +4,7 @@ use debug_info::{DebugInfo, Register};
 use gdbmi::Gdb;
 use nix::libc::{SIGINT, kill};
 use std::{fs, process::Stdio};
-use tokio::{net::UdpSocket, time::sleep};
+use tokio::time::sleep;
 
 use crate::debug_info::DiffInfo;
 
@@ -19,14 +19,12 @@ async fn main() -> anyhow::Result<()> {
     let config: Config = toml::from_str(&fs::read_to_string(CONFIG_PATH)?)?;
     println!("Parsed configurations: {:?}", config);
 
-    // create udp server
-    let udp_addr = format!("0.0.0.0:{}", config.udp_port);
-    let udp_socket = UdpSocket::bind(&udp_addr).await?;
-    println!("Waiting for UDP client on port {}...", config.udp_port);
-
-    let mut buf = [0u8; 64];
-    let (_, client_addr) = udp_socket.recv_from(&mut buf).await?;
-    println!("UDP client connected: {}", client_addr);
+    // create http client
+    let client = reqwest::Client::new();
+    println!(
+        "HTTP client initialized for endpoint: {}",
+        config.api_endpoint
+    );
 
     let duration = Duration::from_secs_f32(config.gdb_timeout);
     let wait_booting = Duration::from_secs_f32(config.gdb_timeout_wait_booting);
@@ -111,12 +109,24 @@ async fn main() -> anyhow::Result<()> {
                 variables: Some(new_debug_info.variables),
             }
         };
-        let json = serde_json::to_string(&diff_info)?;
 
-        // send to udp client
-        if let Err(e) = udp_socket.send_to(json.as_bytes(), &client_addr).await {
-            println!("UDP send error: {}", e);
-            break;
+        if !diff_info.is_empty() {
+            let json = serde_json::to_string(&diff_info)?;
+
+            let payload = serde_json::json!({
+                "content": json
+            });
+
+            if let Err(e) = client
+                .post(&config.api_endpoint)
+                .header("Content-Type", "application/json")
+                .json(&payload)
+                .send()
+                .await
+            {
+                println!("HTTP POST error: {}", e);
+                break;
+            }
         }
 
         if gdb.exec_continue().await.is_err() {
